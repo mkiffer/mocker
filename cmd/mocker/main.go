@@ -25,6 +25,7 @@ func main(){
 		fmt.Println("Running container...")
 		//implement calling run functionality
 		if len(os.Args) < 3{
+			fmt.Println("not enough arguments")
 			fmt.Println("Uasge: mocker run <command>")
 			os.Exit(1)
 		}
