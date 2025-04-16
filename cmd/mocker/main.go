@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"syscall"
 	"github/mkiffer/mocker/internal/container"
 	//"github/mkiffer/mocker/internal/registry"
 	"github/mkiffer/mocker/internal/storage"
@@ -58,45 +59,60 @@ func runContainer(args []string) {
 	command := args
 
 	cont := container.NewContainer(image, command)
-	
+	    //Save container to storage
+	if err := containerStorage.SaveContainer(cont); err != nil{
+		fmt.Printf("Warning: failed to save container. Info: %v\n", err)
+	}
+		
 	go func () {
 		if err := cont.Run(); err != nil {
 			fmt.Printf("Error running container: %v\n", err)
 			// Update container status on error
 			cont.Status = "error"
+			containerStorage.UpdateContainerStatus(cont.ID, "error")
 		}
-	} ()
-	
-	
-    //Save container to storage
-	if err := containerStorage.SaveContainer(cont); err != nil{
-		fmt.Printf("Warning: failed to save container. Info: %v\n", err)
-	}
-	
+		//update container status upon completion
+		containerStorage.UpdateContainerStatus(cont.ID, cont.Status)
 
+	} ()
 	
 	fmt.Printf("Started container with ID: %s\n", cont.ID)
 }
 
 func listContainers(){
 	fmt.Println("Current containers...")
-	containerList , err := containerStorage.ListContainers() 
+	containers , err := containerStorage.ListContainers() 
 	if err != nil{
 		fmt.Printf("Error listing containers from storage. Info: %n\n",err)
 	}
-	if len(containerList) == 0{
+	if len(containers) == 0{
 		fmt.Println("No containers running")
 		return
 	}
+	fmt.Println("ID\t\tIMAGE\tSTATUS\tPID\tCOMMAND")
+	for _, cont := range containers {
+		// Check if the process is still running
+		process, err := os.FindProcess(cont.PID)
+		if err != nil || process.Signal(syscall.Signal(0)) != nil {
+			// Process doesn't exist anymore or can't be signaled
+			if cont.Status == "running" {
+				cont.Status = "exited"
+				containerStorage.UpdateContainerStatus(cont.ID, "exited")
+			}
+		}
 
-	for _, ref := range containerList{
-		fmt.Printf("Container: %s, status: %s", ref.Name, ref.Status)
+		fmt.Printf("%s\t%s\t%s\t%d\t%v\n", 
+			cont.ID, 
+			cont.Image, 
+			cont.Status, 
+			cont.PID, 
+			cont.Command)
 	}
 
 }
 
-func stopContainer(args []string){
-	if len(args) < 1{
+func stopContainer(args []string) {
+	if len(args) < 1 {
 		fmt.Println("Not enough arguments")
 		fmt.Println("Usage: mocker stop <container-id>")
 		os.Exit(1)
@@ -104,15 +120,21 @@ func stopContainer(args []string){
 
 	containerID := args[0]
 
+	// Load container from storage
 	cont, err := containerStorage.LoadContainer(containerID)
-	if err != nil{
-		fmt.Printf("Error loading container with ID: %s. Info %v\n", containerID, err)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err :=cont.Stop(); err != nil{
+	if err := cont.Stop(); err != nil {
 		fmt.Printf("Error stopping container: %v\n", err)
-		os.Exit(1)		
+		os.Exit(1)
+	}
+	
+	// Update container status in storage
+	if err := containerStorage.UpdateContainerStatus(containerID, "stopped"); err != nil {
+		fmt.Printf("Warning: Failed to update container status: %v\n", err)
 	}
 
 	fmt.Printf("Container %s stopped\n", containerID)
