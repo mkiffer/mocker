@@ -4,19 +4,21 @@ import (
 	"fmt"
 	"os"
 	"github/mkiffer/mocker/internal/container"
-	"github/mkiffer/mocker/internal/registry"
+	//"github/mkiffer/mocker/internal/registry"
+	"github/mkiffer/mocker/internal/storage"
 )
 
-var containerRegistry *registry.Registry
+var containerStorage *storage.Storage
 
 //initialise container registry when program starts
 func init(){
-	containerRegistry = registry.NewRegistry();
+	
+	containerStorage = storage.NewStorage("")
+
 }
 
 func main(){
 	fmt.Println("Mocker - A simple container runtime")
-	fmt.Println("Creating new registry of containers")
 
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: mocker <command> [arguments]")
@@ -57,31 +59,38 @@ func runContainer(args []string) {
 
 	cont := container.NewContainer(image, command)
 	
-	// Add the container to the registry before starting it
-	containerRegistry.Add(cont)
-
-	// Start the container in a goroutine so it doesn't block
-	go func() {
+	go func () {
 		if err := cont.Run(); err != nil {
 			fmt.Printf("Error running container: %v\n", err)
 			// Update container status on error
 			cont.Status = "error"
 		}
-	}()
+	} ()
+	
+	
+    //Save container to storage
+	if err := containerStorage.SaveContainer(cont); err != nil{
+		fmt.Printf("Warning: failed to save container. Info: %v\n", err)
+	}
+	
+
 	
 	fmt.Printf("Started container with ID: %s\n", cont.ID)
 }
 
 func listContainers(){
 	fmt.Println("Current containers...")
-	containers := containerRegistry.List()
-	if len(containers) == 0{
+	containerList , err := containerStorage.ListContainers() 
+	if err != nil{
+		fmt.Printf("Error listing containers from storage. Info: %n\n",err)
+	}
+	if len(containerList) == 0{
 		fmt.Println("No containers running")
 		return
 	}
 
-	for _, ref := range containers{
-		fmt.Printf("Container: %v, status: %v", ref.Name, ref.Status)
+	for _, ref := range containerList{
+		fmt.Printf("Container: %s, status: %s", ref.Name, ref.Status)
 	}
 
 }
@@ -95,9 +104,9 @@ func stopContainer(args []string){
 
 	containerID := args[0]
 
-	cont, err := containerRegistry.Get(containerID)
+	cont, err := containerStorage.LoadContainer(containerID)
 	if err != nil{
-		fmt.Printf("Error: %v\n", err)
+		fmt.Printf("Error loading container with ID: %s. Info %v\n", containerID, err)
 		os.Exit(1)
 	}
 
